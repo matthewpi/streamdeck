@@ -1,0 +1,60 @@
+#------------------#
+# IDEs and Editors #
+#------------------#
+
+# Jetbrains
+/.idea
+*.iml
+*.ipr
+*.iws
+
+# Visual Studio Code
+/.vscode
+
+# Sublime Text
+*.sublime-*
+
+#-------------------#
+#     Languages     #
+#-------------------#
+
+# Java
+/target
+dependency-reduced-pom.xml
+
+# Node.js
+/.npm
+/node_modules
+npm-debug.log
+
+.yarn-integrity
+yarn-debug.log
+yarn-error.log
+
+.cache
+.eslintcache
+
+# PHP
+/vendor
+.php_cs.cache
+
+# Python
+*.pyc
+
+#-------------------#
+# Operating Systems #
+#-------------------#
+
+# External Drives
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+
+# Mac OS
+/.DS_Store
+*.DS_Store
+
+# VIM
+.*.sw[a-p]
