@@ -27,6 +27,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"unsafe"
@@ -126,12 +127,25 @@ func slicePtr(b []byte) uintptr {
 
 var reDevBusDevice = regexp.MustCompile(`/dev/bus/usb/(\d+)/(\d+)`)
 
-func Devices() ([]*USB, error) {
-	var devices []*USB
-	if err := walker(USBDevBus, func(u *USB) {
-		devices = append(devices, u)
-	}); err != nil {
+func Devices(filepath string) ([]*USB, error) {
+	var devices, tmp []*USB
+	files, err := os.ReadDir(filepath)
+	if err != nil {
 		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			if tmp, err = Devices(path.Join(filepath, file.Name())); err != nil {
+				return nil, err
+			}
+			devices = append(devices, tmp...)
+			continue
+		}
+		if err := walker(path.Join(filepath, file.Name()), func(u *USB) {
+			devices = append(devices, u)
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return devices, nil
 }
