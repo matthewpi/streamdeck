@@ -96,7 +96,7 @@ func Open(ctx context.Context) (*Device, error) {
 // open attempts to open a connection to a Stream Deck Device.
 func open(ctx context.Context) (*Device, error) {
 	// Get a list of all USB HID devices.
-	devices, err := hid.Devices()
+	devices, err := hid.Devices(hid.USBDevBus)
 	if err != nil {
 		return nil, err
 	}
