@@ -34,7 +34,8 @@ import (
 
 // Buttons is a View that allows setting individual buttons.
 type Buttons struct {
-	sd        *streamdeck.StreamDeck
+	sd *streamdeck.StreamDeck
+
 	buttonsMx sync.Mutex
 	buttons   []button.Button
 }

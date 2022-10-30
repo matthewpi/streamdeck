@@ -40,6 +40,7 @@ type StreamDeck struct {
 	// ch is the internal channel used to receive button press events.
 	ch chan int
 
+	// pressHandlerMx is a mutex used to protect the pressHandler field.
 	pressHandlerMx sync.Mutex
 	// pressHandler is the callback that is called whenever a button is pressed.
 	pressHandler func(context.Context, int) error
@@ -48,22 +49,32 @@ type StreamDeck struct {
 // New opens a connection to a Stream Deck and provides a user-friendly wrapper
 // that makes interacting with the Stream Deck easier and more convenient.
 func New(ctx context.Context) (*StreamDeck, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	s := &StreamDeck{
-		brightness: BrightnessFull,
-
-		cancel: cancel,
-	}
-	var err error
-	s.device, err = Open(ctx)
+	device, err := Open(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if s.device == nil {
+	if device == nil {
 		return nil, err
 	}
+	return NewFromDevice(ctx, device)
+}
 
-	s.ch = make(chan int)
+// NewFromDevice creates a new StreamDeck from an existing Device, most users
+// should use the New function instead.
+//
+// This function can be useful if you have a specific USB device you want to use
+// like if you are using systemd and have a symlink to /dev/streamdeck or if you
+// want to connect to multiple Stream Decks.
+func NewFromDevice(ctx context.Context, device *Device) (*StreamDeck, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	s := &StreamDeck{
+		device:     device,
+		brightness: BrightnessFull,
+
+		cancel: cancel,
+		ch:     make(chan int),
+	}
+
 	go s.device.buttonPressListener(ctx, s.ch)
 	go s.buttonCallbackListener(ctx)
 

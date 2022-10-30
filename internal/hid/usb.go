@@ -25,8 +25,10 @@ package hid
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
+	"fmt"
+	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"unsafe"
@@ -126,120 +128,173 @@ func slicePtr(b []byte) uintptr {
 
 var reDevBusDevice = regexp.MustCompile(`/dev/bus/usb/(\d+)/(\d+)`)
 
-func Devices() ([]*USB, error) {
-	var devices []*USB
-	if err := walker(USBDevBus, func(u *USB) {
-		devices = append(devices, u)
-	}); err != nil {
+// Devices returns a slice of USB devices by recursively searching the given
+// directory. If the directory points to a USB device, then it will be returned
+// as a slice of length 1.
+func Devices(dir string) ([]*USB, error) {
+	s, err := os.Lstat(dir)
+	if err != nil {
 		return nil, err
+	}
+
+	if !s.IsDir() {
+		d, err := Device(dir)
+		if d != nil {
+			return []*USB{d}, err
+		}
+		return nil, err
+	}
+
+	return devices(dir)
+}
+
+// devices .
+func devices(dir string) ([]*USB, error) {
+	// List contents of the directory.
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	var devices []*USB
+	for _, f := range files {
+		path := filepath.Join(dir, f.Name())
+		// If the entry is a directory, then it's a bus, so search for USB devices recursively.
+		if f.IsDir() {
+			devices2, err := Devices(path)
+			if err != nil {
+				return nil, err
+			}
+			devices = append(devices, devices2...)
+			continue
+		}
+
+		device, err := Device(path)
+		if err != nil {
+			return nil, err
+		}
+
+		if device == nil {
+			log.Println("skipping: ", path)
+			continue
+		}
+
+		devices = append(devices, device)
 	}
 	return devices, nil
 }
 
-func walker(path string, cb func(*USB)) error {
-	desc, err := os.ReadFile(path)
+// Device .
+func Device(path string) (*USB, error) {
+	f, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to read device descriptor: %w", err)
 	}
-	r := bytes.NewBuffer(desc)
-	expected := map[byte]bool{
+	r := bytes.NewBuffer(f)
+
+	// Filter is used to filter out descriptors in order.
+	filter := map[byte]bool{
 		USBDescTypeDevice: true,
 	}
-	devDesc := deviceDesc{}
-	var device *USB
+
+	var (
+		device *USB
+		desc   deviceDesc
+	)
 	for r.Len() > 0 {
 		length, err := r.ReadByte()
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("failed to read byte from descriptor: %w", err)
 		}
+
 		if err := r.UnreadByte(); err != nil {
-			return err
+			return nil, fmt.Errorf("failed to unread descriptor length: %w", err)
 		}
-		body := make([]byte, length, length)
-		n, err := r.Read(body)
+
+		b := make([]byte, length)
+		n, err := r.Read(b)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("failed to read descriptor: %w", err)
 		}
+
 		if n != int(length) || length < 2 {
-			return errors.New("short read")
+			return nil, fmt.Errorf("short read from descriptor: %w", err)
 		}
-		if !expected[body[1]] {
+
+		// Skip descriptor that aren't in the filter.
+		descriptor := b[1]
+		if !filter[descriptor] {
 			continue
 		}
-		switch body[1] {
+
+		switch descriptor {
 		case USBDescTypeDevice:
-			expected[USBDescTypeDevice] = false
-			expected[USBDescTypeConfig] = true
-			if err := cast(body, &devDesc); err != nil {
-				return err
+			filter[USBDescTypeDevice] = false
+			filter[USBDescTypeConfig] = true
+			if err := cast(b, &desc); err != nil {
+				return nil, err
 			}
-			//info := Info{
-			//}
 		case USBDescTypeConfig:
-			expected[USBDescTypeInterface] = true
-			expected[USBDescTypeReport] = false
-			expected[USBDescTypeEndpoint] = false
-			// Device left from the previous config
-			if device != nil {
-				cb(device)
-				device = nil
-			}
+			filter[USBDescTypeInterface] = true
+			filter[USBDescTypeReport] = false
+			filter[USBDescTypeEndpoint] = false
 		case USBDescTypeInterface:
-			if device != nil {
-				cb(device)
-				device = nil
-			}
-			expected[USBDescTypeEndpoint] = true
-			expected[USBDescTypeReport] = true
+			filter[USBDescTypeEndpoint] = true
+			filter[USBDescTypeReport] = true
+
 			i := &interfaceDesc{}
-			if err := cast(body, i); err != nil {
-				return err
+			if err := cast(b, i); err != nil {
+				return nil, err
 			}
-			if i.InterfaceClass == USBHidClass {
-				matches := reDevBusDevice.FindStringSubmatch(path)
-				bus := 0
-				dev := 0
-				if len(matches) >= 3 {
-					bus, _ = strconv.Atoi(matches[1])
-					dev, _ = strconv.Atoi(matches[2])
-				}
-				device = &USB{
-					info: DeviceInfo{
-						VendorID:  devDesc.Vendor,
-						ProductID: devDesc.Product,
-						Revision:  devDesc.Revision,
-						SubClass:  i.InterfaceSubClass,
-						Protocol:  i.InterfaceProtocol,
-						Interface: i.Number,
-						Bus:       bus,
-						Device:    dev,
-					},
-					path: path,
-				}
+
+			if i.InterfaceClass != USBHidClass {
+				continue
+			}
+
+			var (
+				bus int
+				dev int
+			)
+			if matches := reDevBusDevice.FindStringSubmatch(path); len(matches) >= 3 {
+				bus, _ = strconv.Atoi(matches[1])
+				dev, _ = strconv.Atoi(matches[2])
+			}
+			device = &USB{
+				info: DeviceInfo{
+					VendorID:  desc.Vendor,
+					ProductID: desc.Product,
+					Revision:  desc.Revision,
+					SubClass:  i.InterfaceSubClass,
+					Protocol:  i.InterfaceProtocol,
+					Interface: i.Number,
+					Bus:       bus,
+					Device:    dev,
+				},
+				path: path,
 			}
 		case USBDescTypeEndpoint:
-			if device != nil {
-				if device.endpointIn != 0 && device.endpointOut != 0 {
-					cb(device)
-					device.endpointIn = 0
-					device.endpointOut = 0
-				}
-				e := &endpointDesc{}
-				if err := cast(body, e); err != nil {
-					return err
-				}
-				if e.Address > 0x80 && device.endpointIn == 0 {
-					device.endpointIn = e.Address
-					device.inputPacketSize = e.MaxPacketSize
-				} else if e.Address < 0x80 && device.endpointOut == 0 {
-					device.endpointOut = e.Address
-					device.outputPacketSize = e.MaxPacketSize
-				}
+			if device == nil {
+				continue
+			}
+
+			if device.endpointIn != 0 && device.endpointOut != 0 {
+				device.endpointIn = 0
+				device.endpointOut = 0
+			}
+
+			e := &endpointDesc{}
+			if err := cast(b, e); err != nil {
+				return nil, err
+			}
+
+			if e.Address > 0x80 && device.endpointIn == 0 {
+				device.endpointIn = e.Address
+				device.inputPacketSize = e.MaxPacketSize
+			} else if e.Address < 0x80 && device.endpointOut == 0 {
+				device.endpointOut = e.Address
+				device.outputPacketSize = e.MaxPacketSize
 			}
 		}
 	}
-	if device != nil {
-		cb(device)
-	}
-	return nil
+	return device, nil
 }

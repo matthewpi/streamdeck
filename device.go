@@ -80,7 +80,13 @@ type Device struct {
 
 // Open attempts to open a connection to a Stream Deck Device.
 func Open(ctx context.Context) (*Device, error) {
-	d, err := open(ctx)
+	return OpenPath(ctx, hid.USBDevBus)
+}
+
+// OpenPath attempts to open a connection to a Stream Deck Device at the given
+// path.
+func OpenPath(ctx context.Context, path string) (*Device, error) {
+	d, err := open(ctx, path)
 	if err != nil {
 		return nil, err
 	}
@@ -94,14 +100,17 @@ func Open(ctx context.Context) (*Device, error) {
 }
 
 // open attempts to open a connection to a Stream Deck Device.
-func open(ctx context.Context) (*Device, error) {
+func open(ctx context.Context, path string) (*Device, error) {
 	// Get a list of all USB HID devices.
-	devices, err := hid.Devices()
+	devices, err := hid.Devices(path)
 	if err != nil {
 		return nil, err
 	}
 
+	// Iterate over all the devices we found.
 	for _, d := range devices {
+		// Iterate over all the device types we have and see if we can find a
+		// match with a supported device.
 		for _, p := range deviceProviders {
 			// Check if the VendorID and ProductID match.
 			if d.Info().VendorID != p.VendorID() || d.Info().ProductID != p.ProductID() {
@@ -123,8 +132,9 @@ func open(ctx context.Context) (*Device, error) {
 
 			return &Device{
 				DeviceProvider: p,
-				fd:             d,
-				blankImage:     blankImage,
+
+				fd:         d,
+				blankImage: blankImage,
 			}, nil
 		}
 	}

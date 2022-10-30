@@ -62,6 +62,7 @@ type USB struct {
 	outputPacketSize uint16
 }
 
+// Open .
 func (u *USB) Open(ctx context.Context) error {
 	u.fMx.Lock()
 	if u.f != nil {
@@ -79,6 +80,7 @@ func (u *USB) Open(ctx context.Context) error {
 	return u.claim(ctx)
 }
 
+// Close .
 func (u *USB) Close(ctx context.Context) error {
 	u.fMx.Lock()
 	defer u.fMx.Unlock()
@@ -99,10 +101,12 @@ func (u *USB) Close(ctx context.Context) error {
 	return nil
 }
 
+// Info .
 func (u *USB) Info() DeviceInfo {
 	return u.info
 }
 
+// Read .
 func (u *USB) Read(ctx context.Context, v []byte, t time.Duration) (int, error) {
 	n, err := u.intr(ctx, u.endpointIn, v, t)
 	if err == nil {
@@ -112,6 +116,7 @@ func (u *USB) Read(ctx context.Context, v []byte, t time.Duration) (int, error) 
 	}
 }
 
+// Write .
 func (u *USB) Write(ctx context.Context, v []byte) (int, error) {
 	if u.endpointOut > 0 {
 		return u.intr(ctx, u.endpointOut, v, 1000)
@@ -119,16 +124,19 @@ func (u *USB) Write(ctx context.Context, v []byte) (int, error) {
 	return u.ctrl(ctx, 0x21, 0x09, 2<<8+0, int(u.info.Interface), v, time.Duration(len(v))*time.Millisecond)
 }
 
+// GetFeatureReport .
 func (u *USB) GetFeatureReport(ctx context.Context, v []byte) (int, error) {
 	// 10100001, GET_REPORT, type*256+id, intf, len, data
 	return u.ctrl(ctx, 0xa1, 0x01, (3<<8)+int(v[0]), int(u.info.Interface), v, 0)
 }
 
+// SendFeatureReport .
 func (u *USB) SendFeatureReport(ctx context.Context, v []byte) (int, error) {
 	// 00100001, SET_REPORT, type*256+id, intf, len, data
 	return u.ctrl(ctx, 0x21, 0x09, (3<<8)+int(v[0]), int(u.info.Interface), v, 0)
 }
 
+// claim .
 func (u *USB) claim(ctx context.Context) error {
 	s := &usbFSIoctl{
 		Interface: uint32(u.info.Interface),
@@ -144,6 +152,7 @@ func (u *USB) claim(ctx context.Context) error {
 	return nil
 }
 
+// release .
 func (u *USB) release(ctx context.Context) error {
 	if r, err := u.ioctl(ctx, USBDevFSRelease, uintptr(unsafe.Pointer(&u.info.Interface))); r == -1 {
 		return err
@@ -159,6 +168,7 @@ func (u *USB) release(ctx context.Context) error {
 	return nil
 }
 
+// ctrl .
 func (u *USB) ctrl(ctx context.Context, rtype, req, val, index int, v []byte, t time.Duration) (int, error) {
 	u.fMx.RLock()
 	defer u.fMx.RUnlock()
@@ -178,6 +188,7 @@ func (u *USB) ctrl(ctx context.Context, rtype, req, val, index int, v []byte, t 
 	}
 }
 
+// intr .
 func (u *USB) intr(ctx context.Context, endpoint uint8, v []byte, t time.Duration) (int, error) {
 	u.fMx.RLock()
 	defer u.fMx.RUnlock()
@@ -194,6 +205,7 @@ func (u *USB) intr(ctx context.Context, endpoint uint8, v []byte, t time.Duratio
 	}
 }
 
+// ioctl .
 func (u *USB) ioctl(ctx context.Context, req uint32, v uintptr) (int, error) {
 	select {
 	case <-ctx.Done():
