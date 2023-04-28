@@ -26,7 +26,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -175,7 +174,6 @@ func devices(dir string) ([]*USB, error) {
 		}
 
 		if device == nil {
-			log.Println("skipping: ", path)
 			continue
 		}
 

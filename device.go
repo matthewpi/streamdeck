@@ -38,9 +38,9 @@ import (
 
 const (
 	// BrightnessMin is the lowest brightness that can be set on a StreamDeck.
-	BrightnessMin = 0
+	BrightnessMin uint32 = 0
 	// BrightnessFull is the highest brightness that can be set on a StreamDeck.
-	BrightnessFull = 100
+	BrightnessFull uint32 = 100
 )
 
 // deviceProviders holds a slice of all known Stream Deck device types.
@@ -172,7 +172,7 @@ func (d *Device) Reset(ctx context.Context) error {
 }
 
 // SetBrightness sets the brightness of all buttons on the Device.
-func (d *Device) SetBrightness(ctx context.Context, brightness int) error {
+func (d *Device) SetBrightness(ctx context.Context, brightness uint32) error {
 	pkt := append(d.BrightnessPacket(), byte(brightness))
 	_, err := d.fd.SendFeatureReport(ctx, pkt)
 	return err

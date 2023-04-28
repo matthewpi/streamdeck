@@ -26,14 +26,25 @@ import (
 	"context"
 	"image"
 	"sync"
+	"sync/atomic"
 )
 
 // StreamDeck represents an Elgato Stream Deck.
 type StreamDeck struct {
 	// device is a wrapper of the underlying USB HID Device.
 	device *Device
-	// brightness is the StreamDeck's current brightness.
-	brightness int
+	// brightness is the Stream Deck's target brightness.  brightness is not
+	// always guaranteed to be the Stream Deck's current brightness, such as if
+	// the Stream Deck is set to sleep after `x` amount of inactivity in order
+	// to preserve the LCD's lifespan.
+	brightness atomic.Uint32
+	// isSleeping determines whether the Stream Deck is sleeping or not.  Sleep
+	// mode turns off the display on the Stream Deck by setting the brightness
+	// to BrightnessMin, and intercepts all button presses as a way to disable
+	// sleep mode, any button presses while sleep mode is enabled will turn back
+	// on the display and WILL NOT trigger their associated pressHandler unless
+	// the button is pressed again while the Stream Deck is not sleeping.
+	isSleeping atomic.Bool
 
 	// cancel is used to cancel the button press and callback goroutines.
 	cancel context.CancelFunc
@@ -59,7 +70,7 @@ func New(ctx context.Context) (*StreamDeck, error) {
 	return NewFromDevice(ctx, device)
 }
 
-// NewFromDevice creates a new StreamDeck from an existing Device, most users
+// NewFromDevice creates a new Stream Deck from an existing Device, most users
 // should use the New function instead.
 //
 // This function can be useful if you have a specific USB device you want to use
@@ -68,12 +79,12 @@ func New(ctx context.Context) (*StreamDeck, error) {
 func NewFromDevice(ctx context.Context, device *Device) (*StreamDeck, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	s := &StreamDeck{
-		device:     device,
-		brightness: BrightnessFull,
+		device: device,
 
 		cancel: cancel,
 		ch:     make(chan int),
 	}
+	s.brightness.Store(BrightnessFull)
 
 	go s.device.buttonPressListener(ctx, s.ch)
 	go s.buttonCallbackListener(ctx)
@@ -82,7 +93,7 @@ func NewFromDevice(ctx context.Context, device *Device) (*StreamDeck, error) {
 }
 
 // Close stops the event listeners and closes the underlying connection to the
-// Stream Deck Device.
+// Stream Deck device.
 func (s *StreamDeck) Close(ctx context.Context) error {
 	s.cancel()
 	return s.device.Close(ctx)
@@ -93,24 +104,68 @@ func (s *StreamDeck) Device() *Device {
 	return s.device
 }
 
-// Brightness returns the current brightness of the Stream Deck.
-func (s *StreamDeck) Brightness() int {
-	return s.brightness
+// Brightness returns the target brightness of the Stream Deck.  This will not
+// return 0 if the Stream Deck is sleeping.  To check if the Stream Deck is
+// sleeping use StreamDeck#IsSleeping().
+func (s *StreamDeck) Brightness() uint32 {
+	return s.brightness.Load()
 }
 
 // SetBrightness sets the brightness of the Stream Deck.
-func (s *StreamDeck) SetBrightness(ctx context.Context, brightness int) error {
+func (s *StreamDeck) SetBrightness(ctx context.Context, brightness uint32) error {
 	if brightness < BrightnessMin {
 		brightness = BrightnessMin
 	}
 	if brightness > BrightnessFull {
 		brightness = BrightnessFull
 	}
+	// Only update the Stream Deck's actual brightness if it isn't sleeping.
+	if !s.IsSleeping() {
+		if err := s.setBrightness(ctx, brightness); err != nil {
+			return err
+		}
+	}
+	// Always persist the new target brightness.
+	s.brightness.Store(brightness)
+	return nil
+}
+
+// setBrightness sets the brightness of the Stream Deck.
+func (s *StreamDeck) setBrightness(ctx context.Context, brightness uint32) error {
 	if err := s.device.SetBrightness(ctx, brightness); err != nil {
 		return err
 	}
-	s.brightness = brightness
 	return nil
+}
+
+// IsSleeping returns true if the Stream Deck is currently sleeping.
+func (s *StreamDeck) IsSleeping() bool {
+	return s.isSleeping.Load()
+}
+
+// SetSleeping sets whether the Stream Deck is sleeping or not.
+func (s *StreamDeck) SetSleeping(ctx context.Context, sleeping bool) error {
+	newBrightness := s.Brightness()
+	if sleeping {
+		newBrightness = BrightnessMin
+	}
+	if err := s.setBrightness(ctx, newBrightness); err != nil {
+		return err
+	}
+
+	// Update the isSleeping state only after successfully changing the
+	// Stream Deck's brightness.
+	s.isSleeping.Store(sleeping)
+
+	return nil
+}
+
+// ToggleSleep toggles the sleep state for the Stream Deck.
+func (s *StreamDeck) ToggleSleep(ctx context.Context) (bool, error) {
+	if err := s.SetSleeping(ctx, !s.IsSleeping()); err != nil {
+		return false, err
+	}
+	return s.IsSleeping(), nil
 }
 
 // SetHandler sets the button press handler used by the end-user to handle press
@@ -147,9 +202,18 @@ func (s *StreamDeck) buttonCallbackListener(ctx context.Context) error {
 			pressHandler := s.pressHandler
 			s.pressHandlerMx.Unlock()
 
+			// Disable sleep whenever a button is pressed, another button press
+			// is required to trigger the underlying press handler.
+			if s.IsSleeping() {
+				// TODO: we should probably do something about this error.
+				_ = s.SetSleeping(ctx, false)
+				continue
+			}
+
 			if pressHandler == nil {
 				continue
 			}
+			// TODO: we should probably do something about this error.
 			_ = pressHandler(ctx, index)
 		}
 	}

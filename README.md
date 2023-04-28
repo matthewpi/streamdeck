@@ -175,7 +175,7 @@ press events.
 
 ### View
 
-A `View` is used by a [`Streamdeck`]() to set the images for all buttons, a View may optionally
+A `View` is used by a [`StreamDeck`]() to set the images for all buttons, a View may optionally
 override the Stream Deck's default button press handler in order to provide a different API for
 handling button presses.
 
