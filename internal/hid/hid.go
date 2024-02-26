@@ -25,7 +25,6 @@ package hid
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -205,15 +204,12 @@ func (u *USB) unsafeIoctl(ctx context.Context, req uint32, v uintptr) (int, erro
 	case <-ctx.Done():
 		return 0, ctx.Err()
 	default:
-		r, r2, err := unix.Syscall(
+		r, _, err := unix.Syscall(
 			unix.SYS_IOCTL,
 			u.f.Fd(),
 			uintptr(req),
 			v,
 		)
-		if err != 0 {
-			fmt.Printf("r=%d r2=%d errno=%d err=%v\n", r, r2, uintptr(err), err)
-		}
 		return int(r), err
 	}
 }
@@ -226,15 +222,12 @@ func (u *USB) ioctl(ctx context.Context, req uint32, v uintptr) (int, error) {
 		u.fMx.RLock()
 		fd := u.f.Fd()
 		u.fMx.RUnlock()
-		r, r2, err := unix.Syscall(
+		r, _, err := unix.Syscall(
 			unix.SYS_IOCTL,
 			fd,
 			uintptr(req),
 			v,
 		)
-		if err != 0 {
-			fmt.Printf("r=%d r2=%d errno=%d err=%v\n", r, r2, uintptr(err), err)
-		}
 		return int(r), err
 	}
 }
