@@ -32,9 +32,10 @@ import (
 
 // Animated represents a Button that is animated.
 type Animated interface {
-	// Animate is called when the Button should start animating,
-	// it is expected that this function exists only after an error
-	// or the passed context is cancelled.
+	// Animate is called when the Button should start animating.
+	//
+	// It is expected that this function only exits if an error occurs or if the
+	// context is cancelled.
 	//
 	// The closure passed should be called with an image processed by
 	// StreamDeck#ProcessImage which should be done ahead of time before Animate
@@ -74,7 +75,9 @@ func NewGIF(sd *streamdeck.StreamDeck, gif *gif.GIF) *GIF {
 		g.frames[i] = rawImage
 	}
 	for i, v := range gif.Delay {
-		g.delay[i] = time.Duration(v) * time.Millisecond * 10
+		// Convert the GIF duration (from 100ths of a second) to a proper
+		// time.Duration
+		g.delay[i] = time.Duration(v) * 10 * time.Millisecond
 	}
 
 	return g

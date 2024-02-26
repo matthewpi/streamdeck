@@ -32,7 +32,8 @@ import (
 	"github.com/matthewpi/streamdeck/button"
 )
 
-// Buttons is a View that allows setting individual buttons.
+// Buttons is an implementation of the View interface that allows setting the
+// displayed content of individual buttons.
 type Buttons struct {
 	sd *streamdeck.StreamDeck
 
@@ -43,7 +44,7 @@ type Buttons struct {
 var _ streamdeck.View = (*Buttons)(nil)
 
 // NewButtons returns a Buttons View capable of displaying multiple static
-// or animated buttons.
+// and/or animated buttons.
 func NewButtons(sd *streamdeck.StreamDeck) (*Buttons, error) {
 	if sd == nil {
 		return nil, errors.New("view: streamdeck cannot be nil")
@@ -54,7 +55,7 @@ func NewButtons(sd *streamdeck.StreamDeck) (*Buttons, error) {
 	}, nil
 }
 
-// Apply satisfies the View interface.
+// Apply updates the displayed content for all buttons on the Stream Deck.
 func (b *Buttons) Apply(ctx context.Context) error {
 	b.buttonsMx.Lock()
 	defer b.buttonsMx.Unlock()
@@ -72,16 +73,6 @@ func (b *Buttons) Apply(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (b *Buttons) animate(ctx context.Context, i int, btn button.Animated) {
-	fn := func(ctx context.Context, v []byte) error {
-		return b.update(ctx, i, v)
-	}
-
-	if err := btn.Animate(ctx, fn); err != nil && !errors.Is(err, context.Canceled) {
-		log.Printf("failed to animate button: %v\n", err)
-	}
 }
 
 // Set sets a Button on the view, it will not render the image on a
@@ -107,6 +98,16 @@ func (b *Buttons) Update(ctx context.Context, index int) error {
 	btn := b.buttons[index]
 	b.buttonsMx.Unlock()
 	return b.updateButton(ctx, index, btn)
+}
+
+func (b *Buttons) animate(ctx context.Context, i int, btn button.Animated) {
+	fn := func(ctx context.Context, v []byte) error {
+		return b.update(ctx, i, v)
+	}
+
+	if err := btn.Animate(ctx, fn); err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("failed to animate button: %v\n", err)
+	}
 }
 
 func (b *Buttons) updateButton(ctx context.Context, index int, btn button.Button) error {

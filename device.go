@@ -25,54 +25,21 @@ package streamdeck
 import (
 	"context"
 	"fmt"
-	"image"
-	"image/color"
-	"image/draw"
 	"strings"
-	"time"
-
-	"github.com/disintegration/gift"
 
 	"github.com/matthewpi/streamdeck/internal/hid"
 )
 
 const (
 	// BrightnessMin is the lowest brightness that can be set on a StreamDeck.
-	BrightnessMin uint32 = 0
+	BrightnessMin uint8 = 0
 	// BrightnessFull is the highest brightness that can be set on a StreamDeck.
-	BrightnessFull uint32 = 100
+	BrightnessFull uint8 = 100
 )
-
-// deviceProviders holds a slice of all known Stream Deck device types.
-var deviceProviders = []DeviceProvider{
-	&Mini{},
-	&Original{},
-	&OriginalMk2{},
-	&XL{},
-}
-
-// DeviceProvider represents a device provider which provides data about
-// different Stream Deck models/versions.
-type DeviceProvider interface {
-	Name() string
-	VendorID() uint16
-	ProductID() uint16
-	Rows() int
-	Cols() int
-	ButtonCount() int
-	ReadOffset() int
-	ImageFormat() ImageFormat
-	ImagePayloadSize() int
-	ImageSize() image.Point
-	BrightnessPacket() []byte
-	ResetPacket() []byte
-	GetImageHeader(int, int, int) []byte
-	GIFT() *gift.GIFT
-}
 
 // Device represents a Stream Deck Device.
 type Device struct {
-	DeviceProvider
+	DeviceType
 
 	fd         *hid.USB
 	blankImage []byte
@@ -111,16 +78,14 @@ func open(ctx context.Context, path string) (*Device, error) {
 	for _, d := range devices {
 		// Iterate over all the device types we have and see if we can find a
 		// match with a supported device.
-		for _, p := range deviceProviders {
+		for _, dt := range deviceTypes {
 			// Check if the VendorID and ProductID match.
-			if d.Info().VendorID != p.VendorID() || d.Info().ProductID != p.ProductID() {
+			if d.Info().VendorID != elgatoVendorID || d.Info().ProductID != dt.ProductID {
 				continue
 			}
 
 			// Get a blank image to use when a button has no image set.
-			img := image.NewRGBA(image.Rect(0, 0, p.ImageSize().X, p.ImageSize().Y))
-			draw.Draw(img, img.Bounds(), image.NewUniform(color.Black), image.Point{X: 0, Y: 0}, draw.Src)
-			blankImage, err := getImageForButton(img, p.ImageFormat())
+			blankImage, err := dt.ImageFormat.Blank(dt.ImageSize, dt.ImageSize)
 			if err != nil {
 				return nil, err
 			}
@@ -131,7 +96,7 @@ func open(ctx context.Context, path string) (*Device, error) {
 			}
 
 			return &Device{
-				DeviceProvider: p,
+				DeviceType: dt,
 
 				fd:         d,
 				blankImage: blankImage,
@@ -166,15 +131,13 @@ func (d *Device) Clear(ctx context.Context) error {
 // Reset resets the Device, restoring its initial state displaying the Elgato
 // logo.
 func (d *Device) Reset(ctx context.Context) error {
-	pkt := d.ResetPacket()
-	_, err := d.fd.SendFeatureReport(ctx, pkt)
+	_, err := d.fd.SendFeatureReport(ctx, d.ResetPacketFunc())
 	return err
 }
 
 // SetBrightness sets the brightness of all buttons on the Device.
-func (d *Device) SetBrightness(ctx context.Context, brightness uint32) error {
-	pkt := append(d.BrightnessPacket(), byte(brightness))
-	_, err := d.fd.SendFeatureReport(ctx, pkt)
+func (d *Device) SetBrightness(ctx context.Context, brightness byte) error {
+	_, err := d.fd.SendFeatureReport(ctx, d.BrightnessPacketFunc(brightness))
 	return err
 }
 
@@ -188,57 +151,42 @@ func (d *Device) SetButton(ctx context.Context, btnIndex int, rawImage []byte) e
 		return fmt.Errorf("streamdeck: invalid key index: %d", btnIndex)
 	}
 
-	var pageNumber int
-	bytesRemaining := len(rawImage)
-	for bytesRemaining > 0 {
-		header := d.GetImageHeader(bytesRemaining, btnIndex, pageNumber)
-		imageReportLength := d.ImagePayloadSize()
-		imageReportPayloadLength := imageReportLength - len(header)
-
-		var thisLength int
-		if imageReportPayloadLength < bytesRemaining {
-			thisLength = imageReportPayloadLength
-		} else {
-			thisLength = bytesRemaining
-		}
-
-		bytesSent := pageNumber * imageReportPayloadLength
-
-		payload := append(header, rawImage[bytesSent:(bytesSent+thisLength)]...)
-		padding := make([]byte, imageReportLength-len(payload))
-
-		thingToSend := append(payload, padding...)
-		if _, err := d.fd.Write(ctx, thingToSend); err != nil {
-			return err
-		}
-
-		bytesRemaining = bytesRemaining - thisLength
-		pageNumber++
-	}
-	return nil
+	return d.DeviceType.ImageTextureFunc(ctx, d.fd.Write, byte(btnIndex), rawImage)
 }
 
 // buttonPressListener listens for button presses over the USB HID bus.
 func (d *Device) buttonPressListener(ctx context.Context, ch chan int) error {
 	numberOfButtons := d.ButtonCount()
-	readOffset := d.ReadOffset()
+	readOffset := d.ButtonOffset
 
-	var data []byte
+	// TODO: figure out what the proper size to use here is.
+	// Trying to set it to readOffset+numberOfButtons caused the ioctl syscall
+	// to get very ANGERY at us.
+	// I've tried 288 (36 * 8), 384, and only 512 seems to work.
+	states := make([]byte, 512)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			data = make([]byte, 512)
-			if _, err := d.fd.Read(ctx, data, 3*time.Second); err != nil {
+			// Zero the entire states array.
+			for i := range states {
+				states[i] = 0x0
+			}
+
+			n, err := d.fd.Read(ctx, states, 0)
+			if err != nil {
 				if strings.Contains(err.Error(), "timed out") {
 					continue
 				}
 				return err
 			}
+			if n == 0 {
+				return nil
+			}
 
 			for i := 0; i < numberOfButtons; i++ {
-				if data[readOffset+i] != 1 {
+				if states[readOffset+i] != 1 {
 					continue
 				}
 				ch <- i

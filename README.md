@@ -2,17 +2,18 @@
 
 Library for directly interacting and controlling an Elgato Stream Deck on Linux.
 
-This library is designed to take exclusive control over a Stream Deck using USB HID, if you are
-an end-user looking for software just to control your Stream Deck, this is not what you are looking
-for. If you are looking to build your own software whether it be a CLI or GUI app to control your
-Stream Deck, you have come to the right place.
+This library is designed to take exclusive control over a Stream Deck using USB
+HID, if you are an end-user looking for software just to control your Stream
+Deck, this is not what you are looking for. If you are looking to build your own
+software whether it be a CLI or GUI app to control your Stream Deck, you have
+come to the right place.
 
-This library was inspired by many of the other go streamdeck libraries, I created this one because
-all the other ones I could find either didn't work, didn't support the features I wanted, required
-CGO, or were poorly designed (imo) making them hard to use.
+This library was inspired by many of the other Go streamdeck libraries.  I
+created this library because all the other libraries I found either didn't work,
+didn't support the features I wanted, required CGO, or were difficult to use.
 
-The internal `hid` package was heavily-based on <https://github.com/zserge/hid> with some
-improvements from <https://github.com/rafaelmartins/usbfs>.
+The internal `hid` package was heavily-based on <https://github.com/zserge/hid>
+with some improvements from <https://github.com/rafaelmartins/usbfs>.
 
 ## Features
 
@@ -175,7 +176,7 @@ press events.
 
 ### View
 
-A `View` is used by a [`StreamDeck`]() to set the images for all buttons, a View may optionally
+A `View` is used by a [`StreamDeck`](#streamdeck) to set the images for all buttons, a View may optionally
 override the Stream Deck's default button press handler in order to provide a different API for
 handling button presses.
 
